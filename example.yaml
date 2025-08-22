@@ -1,0 +1,25 @@
+meta:
+  owner: "Juan Lee"
+  registered_at: "2025-08-22"
+  valid_until: "2026-08-22"
+  purpose: "" # 사용 목적을 입력해주세요.
+
+record:
+  name: "foobar.sunrin.io"
+  type: "A" # 도메인 레코드 타입입니다. 지원 타입 : A, CNAME, TXT
+  value: "8.8.8.8" # 도메인 레코드의 값입니다.
+  ttl: 3600 # 도메인 TTL을 지정하세요. 모르겠다면 3600으로 설정해주세요.
+  priority: null # MX 레코드 등 Priority를 부여해야 하는 경우 지정해주세요.
+  proxied: true # Cloudflare 프록시 여부
+  comment: "2024 자료구조 프로젝트 등록" # 레코드 추가 시 참고할 코멘트를 입력해주세요.
+
+# 여기서부터는 Maintainer 정보입니다.
+# PR 생성 시, 메인테이너 정보를 자세히 입력해주세요.
+# 해당 부분이 없을 경우 PR은 승인되지 않습니다.
+maintainers:
+  - name: "Juan Lee"
+    email: "juan.lee@sunrint.sen.hs.kr"
+    url: "https://github.com/ninejuan"
+  - name: "Sunghu Cho"
+    email: "appturbo102@gmail.com"
+    url: "https://github.com/iamfiro"
