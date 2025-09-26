@@ -1,7 +1,7 @@
 meta:
   owner: "Juan Lee"
   registered_at: "2025-08-22"
-  valid_until: "2026-08-22"
+  valid_until: "2026-08-22" # valid 기간이 지난 이후에는 레코드가 임의 삭제될 수 있으므로 Issue 또는 PR을 통해 연장 요청을 해주세요.
   purpose: "" # 사용 목적을 입력해주세요.
 
 record:

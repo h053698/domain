@@ -1,0 +1,18 @@
+meta:
+  owner: "Yuchan Han"
+  registered_at: "2025-09-26"
+  valid_until: "2026-09-26"
+  purpose: "SSF25 홈페이지 연동"
+
+record:
+  name: "swfestival.kr"
+  type: "A"
+  value: "216.198.79.1"
+  ttl: 3600
+  proxied: false
+  comment: "SSF25 홈페이지 연동"
+
+maintainers:
+  - name: "Yuchan Han"
+    email: "yuchanhan71@gmail.com"
+    url: "https://github.com/h053698"

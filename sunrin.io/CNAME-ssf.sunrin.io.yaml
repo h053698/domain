@@ -1,0 +1,18 @@
+meta:
+  owner: "Yuchan Han"
+  registered_at: "2025-09-26"
+  valid_until: "2026-09-26"
+  purpose: "SSF25 Homepage 도메인 연동"
+
+record:
+  name: "ssf.sunrin.io"
+  type: "CNAME"
+  value: "35f50204ad5aba43.vercel-dns-017.com"
+  ttl: 3600
+  proxied: false
+  comment: "SSF25 홈페이지 연동 (hosted by Vercel)"
+
+maintainers:
+  - name: "Yuchan Han"
+    email: "yuchanhan71@gmail.com"
+    url: "https://github.com/h053698"

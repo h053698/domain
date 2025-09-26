@@ -1,0 +1,17 @@
+meta:
+  owner: "Yuchan Han"
+  registered_at: "2025-08-22"
+  valid_until: "2027-02-10"
+  purpose: "Cloudflare Mail 도메인 인증"
+
+record:
+  name: "sunrin.io"
+  type: "TXT"
+  value: "v=spf1 include:_spf.mx.cloudflare.net ~all"
+  ttl: 3600
+  comment: "Cloudflare Mail 도메인 인증"
+
+maintainers:
+  - name: "Yuchan Han"
+    email: "yuchanhan71@gmail.com"
+    url: "https://github.com/h053698"

@@ -1,0 +1,18 @@
+meta:
+  owner: "Yuchan Han"
+  registered_at: "2025-09-26"
+  valid_until: "2026-09-26"
+  purpose: "2025 선린 해커톤 홈페이지 연동"
+
+record:
+  name: "sunrin.io"
+  type: "CNAME"
+  value: "sunrinthon-11th-web.pages.dev"
+  ttl: 3600
+  proxied: true
+  comment: "2025 선린 해커톤 홈페이지 연동"
+
+maintainers:
+  - name: "Yuchan Han"
+    email: "yuchanhan71@gmail.com"
+    url: "https://github.com/h053698"

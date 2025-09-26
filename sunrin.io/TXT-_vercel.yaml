@@ -1,0 +1,17 @@
+meta:
+  owner: "Yuchan Han"
+  registered_at: "2025-08-22"
+  valid_until: "2027-02-10"
+  purpose: "Vercel 도메인 인증" 
+
+record:
+  name: "_vercel.sunrin.io"
+  type: "TXT"
+  value: "vc-domain-verify=ssf.sunrin.io,e0b7efd382c383bcb2e4"
+  ttl: 3600
+  comment: "Vercel 도메인 인증"
+
+maintainers:
+  - name: "Yuchan Han"
+    email: "yuchanhan71@gmail.com"
+    url: "https://github.com/h053698"

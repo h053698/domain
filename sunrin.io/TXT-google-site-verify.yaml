@@ -1,0 +1,17 @@
+meta:
+  owner: "Yuchan Han"
+  registered_at: "2025-08-22"
+  valid_until: "2027-02-10"
+  purpose: "Google Site Verification"
+
+record:
+  name: "sunrin.io"
+  type: "TXT"
+  value: "google-site-verification=n38U8mvYl1Ysa1XSPhye9pLqoBF9G2flG1eh9cergok"
+  ttl: 3600
+  comment: "Google Site Verification"
+
+maintainers:
+  - name: "Yuchan Han"
+    email: "yuchanhan71@gmail.com"
+    url: "https://github.com/h053698"

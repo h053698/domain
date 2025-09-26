@@ -1,0 +1,17 @@
+meta:
+  owner: "Yuchan Han"
+  registered_at: "2025-09-26"
+  valid_until: "2027-02-10"
+  purpose: "Github sunrint-hs Organization 도메인 인증"
+
+record:
+  name: "_gh-sunrint-hs-o.sunrin.io"
+  type: "TXT"
+  value: "bfb1865c6b"
+  ttl: 3600
+  comment: "Github sunrint-hs Organization 도메인 인증"
+
+maintainers:
+  - name: "Yuchan Han"
+    email: "yuchanhan71@gmail.com"
+    url: "https://github.com/h053698"
