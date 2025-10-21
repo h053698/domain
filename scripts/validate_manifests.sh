@@ -3,7 +3,12 @@
 set -euo pipefail
 
 if ! command -v yq >/dev/null 2>&1; then
-  echo "yq command not found. Install yq to run this validator." >&2
+  echo "yq command not found. Install mikefarah yq v4+ to run this validator." >&2
+  exit 127
+fi
+
+if ! yq --version 2>&1 | grep -q 'mikefarah/yq'; then
+  echo "validate_manifests.sh requires mikefarah yq v4+. Current yq: $(yq --version 2>&1)" >&2
   exit 127
 fi
 
