@@ -1,0 +1,18 @@
+meta:
+  owner: "Sunrin Kim"
+  registered_at: "2024-06-01"
+  valid_until: "2025-06-01"
+  purpose: "Example CNAME 레코드"
+
+record:
+  name: "www.example.com"
+  type: "CNAME"
+  value: "example-app.pages.dev"
+  ttl: 3600
+  proxied: true
+  comment: "Example CNAME 레코드"
+
+maintainers:
+  - name: "Sunrin Kim"
+    email: "sunrin@sunrint.hs.kr"
+    url: "https://github.com/sunrint-hs"

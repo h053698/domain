@@ -1,0 +1,17 @@
+meta:
+  owner: "Sunrin Kim"
+  registered_at: "2024-06-01"
+  valid_until: "2025-06-01"
+  purpose: "Example TXT 레코드"
+
+record:
+  name: "_verify.example.com"
+  type: "TXT"
+  value: "example-verification-token"
+  ttl: 3600
+  comment: "Example TXT 레코드"
+
+maintainers:
+  - name: "Sunrin Kim"
+    email: "sunrin@sunrint.hs.kr"
+    url: "https://github.com/sunrint-hs"

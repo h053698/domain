@@ -1,0 +1,18 @@
+meta:
+  owner: "Sunrin Kim"
+  registered_at: "2024-06-01"
+  valid_until: "2025-06-01"
+  purpose: "Example A 레코드"
+
+record:
+  name: "api.example.com"
+  type: "A"
+  value: "1.1.1.1"
+  ttl: 3600
+  proxied: false
+  comment: "Example A 레코드"
+
+maintainers:
+  - name: "Sunrin Kim"
+    email: "sunrin@sunrint.hs.kr"
+    url: "https://github.com/sunrint-hs"
