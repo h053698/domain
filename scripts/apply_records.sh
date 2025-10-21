@@ -208,9 +208,19 @@ sync_domain() {
     echo "Deleting records..."
     while IFS= read -r -d '' record; do
       [[ -n "$record" ]] || continue
-      id=$(jq -r '.id' <<<"$record")
-      name=$(jq -r '.name' <<<"$record")
-      type=$(jq -r '.type' <<<"$record")
+      # Validate that record is valid JSON before parsing
+      if ! jq -e '.' >/dev/null 2>&1 <<<"$record"; then
+        echo "   ! Skipping invalid record JSON" >&2
+        continue
+      fi
+      id=$(jq -r '.id // empty' <<<"$record")
+      name=$(jq -r '.name // empty' <<<"$record")
+      type=$(jq -r '.type // empty' <<<"$record")
+      # Skip if any required field is empty
+      if [[ -z "$id" || -z "$name" || -z "$type" ]]; then
+        echo "   ! Skipping record with missing fields (id: $id, name: $name, type: $type)" >&2
+        continue
+      fi
       echo "   • DELETE $type $name"
       resp="$(curl -sS -X DELETE \
         -H "Authorization: Bearer $CF_TOKEN" \
@@ -228,11 +238,22 @@ sync_domain() {
     echo "Updating records..."
     while IFS= read -r -d '' entry; do
       [[ -n "$entry" ]] || continue
+      # Validate that entry is valid JSON before parsing
+      if ! jq -e '.' >/dev/null 2>&1 <<<"$entry"; then
+        echo "   ! Skipping invalid entry JSON" >&2
+        continue
+      fi
       desired=$(jq '.desired' <<<"$entry")
-      existing_id=$(jq -r '.existing.id' <<<"$entry")
-      type=$(jq -r '.desired.type' <<<"$entry")
-      name=$(jq -r '.desired.name' <<<"$entry")
-      file=$(jq -r '.desired.file' <<<"$entry")
+      existing_id=$(jq -r '.existing.id // empty' <<<"$entry")
+      type=$(jq -r '.desired.type // empty' <<<"$entry")
+      name=$(jq -r '.desired.name // empty' <<<"$entry")
+      file=$(jq -r '.desired.file // empty' <<<"$entry")
+      
+      # Skip if any required field is empty
+      if [[ -z "$existing_id" || -z "$type" || -z "$name" ]]; then
+        echo "   ! Skipping record with missing fields (id: $existing_id, type: $type, name: $name)" >&2
+        continue
+      fi
 
       payload=$(jq -c '
         {
@@ -264,9 +285,20 @@ sync_domain() {
     echo "Creating records..."
     while IFS= read -r -d '' record; do
       [[ -n "$record" ]] || continue
-      type=$(jq -r '.type' <<<"$record")
-      name=$(jq -r '.name' <<<"$record")
-      file=$(jq -r '.file' <<<"$record")
+      # Validate that record is valid JSON before parsing
+      if ! jq -e '.' >/dev/null 2>&1 <<<"$record"; then
+        echo "   ! Skipping invalid record JSON" >&2
+        continue
+      fi
+      type=$(jq -r '.type // empty' <<<"$record")
+      name=$(jq -r '.name // empty' <<<"$record")
+      file=$(jq -r '.file // empty' <<<"$record")
+      
+      # Skip if any required field is empty
+      if [[ -z "$type" || -z "$name" ]]; then
+        echo "   ! Skipping record with missing fields (type: $type, name: $name)" >&2
+        continue
+      fi
 
       payload=$(jq -c '
         {
