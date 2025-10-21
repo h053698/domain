@@ -213,12 +213,13 @@ sync_domain() {
         echo "   ! Skipping invalid record JSON" >&2
         continue
       fi
-      id=$(jq -r '.id // empty' <<<"$record")
-      name=$(jq -r '.name // empty' <<<"$record")
-      type=$(jq -r '.type // empty' <<<"$record")
+      # Extract fields with error suppression
+      id=$(jq -r '.id // empty' 2>/dev/null <<<"$record" || echo "")
+      name=$(jq -r '.name // empty' 2>/dev/null <<<"$record" || echo "")
+      type=$(jq -r '.type // empty' 2>/dev/null <<<"$record" || echo "")
       # Skip if any required field is empty
       if [[ -z "$id" || -z "$name" || -z "$type" ]]; then
-        echo "   ! Skipping record with missing fields (id: $id, name: $name, type: $type)" >&2
+        echo "   ! Skipping record with missing fields" >&2
         continue
       fi
       echo "   • DELETE $type $name"
@@ -243,15 +244,16 @@ sync_domain() {
         echo "   ! Skipping invalid entry JSON" >&2
         continue
       fi
-      desired=$(jq '.desired' <<<"$entry")
-      existing_id=$(jq -r '.existing.id // empty' <<<"$entry")
-      type=$(jq -r '.desired.type // empty' <<<"$entry")
-      name=$(jq -r '.desired.name // empty' <<<"$entry")
-      file=$(jq -r '.desired.file // empty' <<<"$entry")
+      # Extract fields with error suppression
+      desired=$(jq '.desired' 2>/dev/null <<<"$entry" || echo "{}")
+      existing_id=$(jq -r '.existing.id // empty' 2>/dev/null <<<"$entry" || echo "")
+      type=$(jq -r '.desired.type // empty' 2>/dev/null <<<"$entry" || echo "")
+      name=$(jq -r '.desired.name // empty' 2>/dev/null <<<"$entry" || echo "")
+      file=$(jq -r '.desired.file // empty' 2>/dev/null <<<"$entry" || echo "")
       
       # Skip if any required field is empty
       if [[ -z "$existing_id" || -z "$type" || -z "$name" ]]; then
-        echo "   ! Skipping record with missing fields (id: $existing_id, type: $type, name: $name)" >&2
+        echo "   ! Skipping record with missing fields" >&2
         continue
       fi
 
@@ -290,13 +292,14 @@ sync_domain() {
         echo "   ! Skipping invalid record JSON" >&2
         continue
       fi
-      type=$(jq -r '.type // empty' <<<"$record")
-      name=$(jq -r '.name // empty' <<<"$record")
-      file=$(jq -r '.file // empty' <<<"$record")
+      # Extract fields with error suppression
+      type=$(jq -r '.type // empty' 2>/dev/null <<<"$record" || echo "")
+      name=$(jq -r '.name // empty' 2>/dev/null <<<"$record" || echo "")
+      file=$(jq -r '.file // empty' 2>/dev/null <<<"$record" || echo "")
       
       # Skip if any required field is empty
       if [[ -z "$type" || -z "$name" ]]; then
-        echo "   ! Skipping record with missing fields (type: $type, name: $name)" >&2
+        echo "   ! Skipping record with missing fields" >&2
         continue
       fi
 
