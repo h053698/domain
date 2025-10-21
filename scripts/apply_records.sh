@@ -2,41 +2,8 @@
 
 set -euo pipefail
 
-usage() {
-  cat <<'USAGE'
-Usage: scripts/apply_records.sh <cloudflare_token> <domain_dir>=<zone_id> [<domain_dir>=<zone_id>...]
-
-Synchronises multiple Cloudflare zones with the manifests stored under each domain directory.
-
-Example:
-  scripts/apply_records.sh "$CF_TOKEN" \
-    "sunrin.io=$CF_ZONE_SUNRIN_IO" \
-    "swfestival.kr=$CF_ZONE_SWFESTIVAL_KR"
-USAGE
-}
-
-if [[ $# -lt 2 ]]; then
-  usage >&2
-  exit 1
-fi
-
 CF_TOKEN="$1"
 shift
-
-if [[ -z "$CF_TOKEN" ]]; then
-  echo "Cloudflare token must be provided as the first argument." >&2
-  exit 1
-fi
-
-if ! command -v yq >/dev/null 2>&1; then
-  echo "yq is required but not found in PATH." >&2
-  exit 127
-fi
-
-if ! command -v jq >/dev/null 2>&1; then
-  echo "jq is required but not found in PATH." >&2
-  exit 127
-fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_BASE="https://api.cloudflare.com/client/v4"
@@ -45,305 +12,181 @@ DOMAIN_DIRS=()
 DOMAIN_ZONES=()
 
 for mapping in "$@"; do
-  if [[ "$mapping" != *=* ]]; then
-    echo "Invalid mapping '$mapping'. Use <domain_dir>=<zone_id>." >&2
-    exit 1
-  fi
-  dir="${mapping%%=*}"
-  zone="${mapping#*=}"
-
-  if [[ -z "$dir" || -z "$zone" ]]; then
-    echo "Invalid mapping '$mapping'. Directory and zone id must be non-empty." >&2
-    exit 1
-  fi
-
-  DOMAIN_DIRS+=("$dir")
-  DOMAIN_ZONES+=("$zone")
+  DOMAIN_DIRS+=("${mapping%%=*}")
+  DOMAIN_ZONES+=("${mapping#*=}")
 done
 
-TMP_ITEMS=()
-cleanup() {
-  for item in "${TMP_ITEMS[@]}"; do
-    rm -f "$item" 2>/dev/null || true
-  done
+jq_field() { jq -r "${2} // empty" 2>/dev/null <<<"$1" || echo ""; }
+is_json() { [[ -n "$1" ]] && jq -e '.' >/dev/null 2>&1 <<<"$1"; }
+api_success() { [[ "$(jq -r '.success' <<<"$1")" == "true" ]]; }
+api_error() { jq -r '.errors | map(.message) | join("; ")' <<<"$1"; }
+
+build_payload() {
+  jq -c '{type,name,content,ttl}
+    + (if (.comment // "") != "" then {comment} else {} end)
+    + (if (.priority // null) != null then {priority} else {} end)
+    + (if (.type == "A" or .type == "CNAME") then {proxied: (.proxied // false)} else {} end)
+  ' <<<"$1"
 }
-trap cleanup EXIT
 
-sync_domain() {
-  local manifest_input="$1"
-  local zone_id="$2"
-  local response message
+cf_api() {
+  local method="$1" url="$2" payload="${3:-}"
+  curl -sS -X "$method" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" \
+    ${payload:+--data "$payload"} "$url"
+}
 
-  local manifest_dir
-  if [[ "$manifest_input" = /* ]]; then
-    manifest_dir="$manifest_input"
-  else
-    manifest_dir="$REPO_ROOT/$manifest_input"
-  fi
-
-  if [[ ! -d "$manifest_dir" ]]; then
-    echo "Manifest directory '$manifest_input' not found." >&2
-    return 1
-  fi
-
-  local tmp_manifest tmp_cloud
-  tmp_manifest="$(mktemp)"
-  tmp_cloud="$(mktemp)"
-  TMP_ITEMS+=("$tmp_manifest" "$tmp_cloud")
-
-  : >"$tmp_manifest"
-
-  local manifest_count=0
-  while IFS= read -r file; do
-    [[ -n "$file" ]] || continue
-    local absolute_path="$file"
-    local relative="${absolute_path#$REPO_ROOT/}"
-    local record_json
-    record_json="$(yq e -o=json -I=0 '.record' "$absolute_path")"
-    jq -c --arg file "$relative" '
-      {
-        file: $file,
-        type: .type,
-        name: .name,
-        content: .value,
-        ttl: .ttl,
-        proxied: (if has("proxied") then .proxied else null end),
-        priority: (if has("priority") then .priority else null end),
-        comment: (if has("comment") then .comment else null end)
-      }
-    ' <<<"$record_json" >>"$tmp_manifest"
-    manifest_count=$((manifest_count + 1))
-  done < <(find "$manifest_dir" -type f -name '*.yaml' | sort)
-
-  if (( manifest_count == 0 )); then
-    echo "No manifest files found in $manifest_dir. Skipping."
-    return 0
-  fi
-
-  local manifest_records_json
-  manifest_records_json="$(jq -s '.' "$tmp_manifest")"
-
-  : >"$tmp_cloud"
-  local page=1
-  local total_pages=1
-
-  while (( page <= total_pages )); do
-    response="$(curl -sS -X GET \
-      -H "Authorization: Bearer $CF_TOKEN" \
-      -H "Content-Type: application/json" \
-      "$API_BASE/zones/$zone_id/dns_records?per_page=100&page=$page")"
-
-    if [[ "$(jq -r '.success' <<<"$response")" != "true" ]]; then
-      message="$(jq -r '.errors | map(.message) | join("; ")' <<<"$response")"
-      echo "[$manifest_input] Failed to fetch DNS records: ${message:-unknown error}" >&2
+process_records() {
+  local action="$1" records_json="$2" zone_id="$3"
+  
+  while IFS= read -r -d '' item; do
+    [[ -n "$item" ]] || continue
+    is_json "$item" || { echo "   ! Skipping invalid JSON" >&2; continue; }
+    
+    local id type name file payload method url
+    
+    case "$action" in
+      DELETE)
+        id=$(jq_field "$item" ".id")
+        type=$(jq_field "$item" ".type")
+        name=$(jq_field "$item" ".name")
+        [[ -n "$id" && -n "$type" && -n "$name" ]] || { echo "   ! Missing fields" >&2; continue; }
+        method="DELETE"
+        url="$API_BASE/zones/$zone_id/dns_records/$id"
+        ;;
+      UPDATE)
+        local desired existing_id
+        desired=$(jq '.desired' 2>/dev/null <<<"$item" || echo "{}")
+        existing_id=$(jq_field "$item" ".existing.id")
+        type=$(jq_field "$item" ".desired.type")
+        name=$(jq_field "$item" ".desired.name")
+        file=$(jq_field "$item" ".desired.file")
+        [[ -n "$existing_id" && -n "$type" && -n "$name" ]] || { echo "   ! Missing fields" >&2; continue; }
+        payload=$(build_payload "$desired")
+        method="PUT"
+        url="$API_BASE/zones/$zone_id/dns_records/$existing_id"
+        ;;
+      CREATE)
+        type=$(jq_field "$item" ".type")
+        name=$(jq_field "$item" ".name")
+        file=$(jq_field "$item" ".file")
+        [[ -n "$type" && -n "$name" ]] || { echo "   ! Missing fields" >&2; continue; }
+        payload=$(build_payload "$item")
+        method="POST"
+        url="$API_BASE/zones/$zone_id/dns_records"
+        ;;
+    esac
+    
+    echo "   • $action $type $name${file:+ (from $file)}"
+    local resp
+    resp=$(cf_api "$method" "$url" "$payload")
+    
+    if ! api_success "$resp"; then
+      echo "   ! Failed: $(api_error "$resp")" >&2
       return 1
     fi
-
-    jq -c '
-      .result[]
-      | select(.type == "A" or .type == "CNAME" or .type == "TXT")
-      | {
-          id: .id,
-          type: .type,
-          name: .name,
-          content: .content,
-          ttl: .ttl,
-          proxied: (if has("proxied") then .proxied else null end),
-          priority: (if has("priority") then .priority else null end),
-          comment: (.comment // null)
-        }
-    ' <<<"$response" >>"$tmp_cloud"
-
-    total_pages=$(jq '.result_info.total_pages // 1' <<<"$response")
-    page=$((page + 1))
-  done
-
-  local cloudflare_records_json
-  cloudflare_records_json="$(jq -s '.' "$tmp_cloud")"
-
-  local records_to_delete
-  records_to_delete="$(jq --argjson manifests "$manifest_records_json" '
-    [ .[] as $cf
-      | select(($manifests | any(.type == $cf.type and .name == $cf.name)) | not)
-    ]
-  ' <<<"$cloudflare_records_json")"
-
-  local records_to_create
-  records_to_create="$(jq --argjson cloud "$cloudflare_records_json" '
-    [ .[] as $manifest
-      | select(($cloud | any(.type == $manifest.type and .name == $manifest.name)) | not)
-    ]
-  ' <<<"$manifest_records_json")"
-
-  local records_to_update
-  records_to_update="$(jq --argjson cloud "$cloudflare_records_json" '
-    [ .[] as $desired
-      | ($cloud | map(select(.type == $desired.type and .name == $desired.name))[0]) as $current
-      | select($current != null)
-      | select(
-          ($current.content != $desired.content)
-          or ($current.ttl != $desired.ttl)
-          or (
-            ($desired.type == "A" or $desired.type == "CNAME")
-            and (($current.proxied // false) != ($desired.proxied // false))
-          )
-          or (($current.priority // null) != ($desired.priority // null))
-          or (($current.comment // "") != ($desired.comment // ""))
-        )
-      | {existing: $current, desired: $desired}
-    ]
-  ' <<<"$manifest_records_json")"
-
-  local records_deleted records_created records_updated
-  records_deleted=$(jq 'length' <<<"$records_to_delete")
-  records_created=$(jq 'length' <<<"$records_to_create")
-  records_updated=$(jq 'length' <<<"$records_to_update")
-
-  echo "== Syncing ${manifest_dir#$REPO_ROOT/} (zone: $zone_id) =="
-  echo " - to create: $records_created"
-  echo " - to update: $records_updated"
-  echo " - to delete: $records_deleted"
-
-  if (( records_deleted > 0 )); then
-    echo "Deleting records..."
-    while IFS= read -r -d '' record; do
-      [[ -n "$record" ]] || continue
-
-      if ! jq -e '.' >/dev/null 2>&1 <<<"$record"; then
-        echo "   ! Skipping invalid record JSON" >&2
-        continue
-      fi
-
-      id=$(jq -r '.id // empty' 2>/dev/null <<<"$record" || echo "")
-      name=$(jq -r '.name // empty' 2>/dev/null <<<"$record" || echo "")
-      type=$(jq -r '.type // empty' 2>/dev/null <<<"$record" || echo "")
-
-      if [[ -z "$id" || -z "$name" || -z "$type" ]]; then
-        echo "   ! Skipping record with missing fields" >&2
-        continue
-      fi
-      echo "   • DELETE $type $name"
-      resp="$(curl -sS -X DELETE \
-        -H "Authorization: Bearer $CF_TOKEN" \
-        -H "Content-Type: application/json" \
-        "$API_BASE/zones/$zone_id/dns_records/$id")"
-      if [[ "$(jq -r '.success' <<<"$resp")" != "true" ]]; then
-        message="$(jq -r '.errors | map(.message) | join("; ")' <<<"$resp")"
-        echo "   ! Failed to delete $type $name: ${message:-unknown error}" >&2
-        return 1
-      fi
-    done < <(jq -j '.[] | @json, "\u0000"' <<<"$records_to_delete")
-  fi
-
-  if (( records_updated > 0 )); then
-    echo "Updating records..."
-    while IFS= read -r -d '' entry; do
-      [[ -n "$entry" ]] || continue
-      if ! jq -e '.' >/dev/null 2>&1 <<<"$entry"; then
-        echo "   ! Skipping invalid entry JSON" >&2
-        continue
-      fi
-      desired=$(jq '.desired' 2>/dev/null <<<"$entry" || echo "{}")
-      existing_id=$(jq -r '.existing.id // empty' 2>/dev/null <<<"$entry" || echo "")
-      type=$(jq -r '.desired.type // empty' 2>/dev/null <<<"$entry" || echo "")
-      name=$(jq -r '.desired.name // empty' 2>/dev/null <<<"$entry" || echo "")
-      file=$(jq -r '.desired.file // empty' 2>/dev/null <<<"$entry" || echo "")
-      
-      # Skip if any required field is empty
-      if [[ -z "$existing_id" || -z "$type" || -z "$name" ]]; then
-        echo "   ! Skipping record with missing fields" >&2
-        continue
-      fi
-
-      payload=$(jq -c '
-        {
-          type,
-          name,
-          content,
-          ttl
-        }
-        + (if (.comment // "") != "" then {comment: .comment} else {} end)
-        + (if (.priority // null) != null then {priority: .priority} else {} end)
-        + (if (.type == "A" or .type == "CNAME") then {proxied: (.proxied // false)} else {} end)
-      ' <<<"$desired")
-
-      echo "   • UPDATE $type $name (from $file)"
-      resp="$(curl -sS -X PUT \
-        -H "Authorization: Bearer $CF_TOKEN" \
-        -H "Content-Type: application/json" \
-        --data "$payload" \
-        "$API_BASE/zones/$zone_id/dns_records/$existing_id")"
-      if [[ "$(jq -r '.success' <<<"$resp")" != "true" ]]; then
-        message="$(jq -r '.errors | map(.message) | join("; ")' <<<"$resp")"
-        echo "   ! Failed to update $type $name: ${message:-unknown error}" >&2
-        return 1
-      fi
-    done < <(jq -j '.[] | @json, "\u0000"' <<<"$records_to_update")
-  fi
-
-  if (( records_created > 0 )); then
-    echo "Creating records..."
-    while IFS= read -r -d '' record; do
-      [[ -n "$record" ]] || continue
-      # Validate that record is valid JSON before parsing
-      if ! jq -e '.' >/dev/null 2>&1 <<<"$record"; then
-        echo "   ! Skipping invalid record JSON" >&2
-        continue
-      fi
-      # Extract fields with error suppression
-      type=$(jq -r '.type // empty' 2>/dev/null <<<"$record" || echo "")
-      name=$(jq -r '.name // empty' 2>/dev/null <<<"$record" || echo "")
-      file=$(jq -r '.file // empty' 2>/dev/null <<<"$record" || echo "")
-      
-      # Skip if any required field is empty
-      if [[ -z "$type" || -z "$name" ]]; then
-        echo "   ! Skipping record with missing fields" >&2
-        continue
-      fi
-
-      payload=$(jq -c '
-        {
-          type,
-          name,
-          content,
-          ttl
-        }
-        + (if (.comment // "") != "" then {comment: .comment} else {} end)
-        + (if (.priority // null) != null then {priority: .priority} else {} end)
-        + (if (.type == "A" or .type == "CNAME") then {proxied: (.proxied // false)} else {} end)
-      ' <<<"$record")
-
-      echo "   • CREATE $type $name (from $file)"
-      resp="$(curl -sS -X POST \
-        -H "Authorization: Bearer $CF_TOKEN" \
-        -H "Content-Type: application/json" \
-        --data "$payload" \
-        "$API_BASE/zones/$zone_id/dns_records")"
-      if [[ "$(jq -r '.success' <<<"$resp")" != "true" ]]; then
-        message="$(jq -r '.errors | map(.message) | join("; ")' <<<"$resp")"
-        echo "   ! Failed to create $type $name: ${message:-unknown error}" >&2
-        return 1
-      fi
-    done < <(jq -j '.[] | @json, "\u0000"' <<<"$records_to_create")
-  fi
-
-  echo "Finished syncing ${manifest_dir#$REPO_ROOT/}."
-  return 0
+  done < <(jq -j '.[] | @json, "\u0000"' 2>/dev/null <<<"$records_json")
 }
 
-overall_status=0
-for i in "${!DOMAIN_DIRS[@]}"; do
-  dir="${DOMAIN_DIRS[$i]}"
-  zone="${DOMAIN_ZONES[$i]}"
-  if ! sync_domain "$dir" "$zone"; then
-    overall_status=1
+fetch_cloudflare_records() {
+  local zone_id="$1" output_file="$2" manifest_input="$3"
+  : >"$output_file"
+  local page=1 total_pages=1
+  
+  while (( page <= total_pages )); do
+    local resp
+    resp=$(cf_api "GET" "$API_BASE/zones/$zone_id/dns_records?per_page=100&page=$page")
+    api_success "$resp" || { echo "[$manifest_input] Fetch failed: $(api_error "$resp")" >&2; return 1; }
+    
+    jq -c '.result[] | select(.type == "A" or .type == "CNAME" or .type == "TXT") |
+      {id,type,name,content,ttl,proxied:(if has("proxied") then .proxied else null end),
+       priority:(if has("priority") then .priority else null end),comment:(.comment // null)}
+    ' <<<"$resp" >>"$output_file"
+    
+    total_pages=$(jq '.result_info.total_pages // 1' <<<"$resp")
+    ((page++))
+  done
+}
+
+load_manifest_records() {
+  local manifest_dir="$1" output_file="$2"
+  : >"$output_file"
+  local count=0
+  
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    yq e -o=json -I=0 '.record' "$file" | jq -c --arg file "${file#$REPO_ROOT/}" '
+      {file:$file,type,name,content:.value,ttl,
+       proxied:(if has("proxied") then .proxied else null end),
+       priority:(if has("priority") then .priority else null end),
+       comment:(if has("comment") then .comment else null end)}
+    ' >>"$output_file"
+    ((count++))
+  done < <(find "$manifest_dir" -type f -name '*.yaml' | sort)
+  
+  echo "$count"
+}
+
+compute_diff() {
+  local manifests="$1" cloud="$2"
+  
+  jq -n --argjson m "$manifests" --argjson c "$cloud" '{
+    delete: [$c[] as $cf | select(($m | any(.type == $cf.type and .name == $cf.name)) | not)],
+    create: [$m[] as $mf | select(($c | any(.type == $mf.type and .name == $mf.name)) | not)],
+    update: [$m[] as $d | ($c | map(select(.type == $d.type and .name == $d.name))[0]) as $cur |
+      select($cur != null) | select(
+        ($cur.content != $d.content) or ($cur.ttl != $d.ttl) or
+        (($d.type == "A" or $d.type == "CNAME") and (($cur.proxied // false) != ($d.proxied // false))) or
+        (($cur.priority // null) != ($d.priority // null)) or (($cur.comment // "") != ($d.comment // ""))
+      ) | {existing: $cur, desired: $d}]
+  }'
+}
+
+sync_domain() {
+  local manifest_input="$1" zone_id="$2"
+  local manifest_dir="${manifest_input#/}"
+  [[ "$manifest_input" = /* ]] || manifest_dir="$REPO_ROOT/$manifest_input"
+  
+  [[ -d "$manifest_dir" ]] || { echo "Directory '$manifest_input' not found." >&2; return 1; }
+  
+  local tmp_manifest tmp_cloud
+  tmp_manifest="$(mktemp)" tmp_cloud="$(mktemp)"
+  
+  local count
+  count=$(load_manifest_records "$manifest_dir" "$tmp_manifest")
+  (( count == 0 )) && { echo "No manifests in $manifest_dir. Skipping."; return 0; }
+  
+  fetch_cloudflare_records "$zone_id" "$tmp_cloud" "$manifest_input" || return 1
+  
+  local diff
+  diff=$(compute_diff "$(jq -s '.' "$tmp_manifest")" "$(jq -s '.' "$tmp_cloud")")
+  
+  local del cre upd
+  del=$(jq '.delete | length' <<<"$diff")
+  cre=$(jq '.create | length' <<<"$diff")
+  upd=$(jq '.update | length' <<<"$diff")
+  
+  echo "== Syncing ${manifest_dir#$REPO_ROOT/} (zone: $zone_id) =="
+  echo " - to create: $cre, update: $upd, delete: $del"
+  
+  (( del > 0 )) && { echo "Deleting..."; process_records DELETE "$(jq '.delete' <<<"$diff")" "$zone_id" || return 1; }
+  (( upd > 0 )) && { echo "Updating..."; process_records UPDATE "$(jq '.update' <<<"$diff")" "$zone_id" || return 1; }
+  (( cre > 0 )) && { echo "Creating..."; process_records CREATE "$(jq '.create' <<<"$diff")" "$zone_id" || return 1; }
+  
+  echo "Finished syncing ${manifest_dir#$REPO_ROOT/}."
+}
+
+main() {
+  local i status=0
+  for i in "${!DOMAIN_DIRS[@]}"; do
+    sync_domain "${DOMAIN_DIRS[$i]}" "${DOMAIN_ZONES[$i]}" || status=1
+  done
+  
+  if (( status == 0 )); then
+    echo "All domains synced successfully."
+  else
+    echo "Some domains failed to sync." >&2
   fi
-done
+  exit "$status"
+}
 
-if (( overall_status == 0 )); then
-  echo "All domains synced successfully."
-else
-  echo "Some domains failed to sync." >&2
-fi
-
-exit "$overall_status"
+main

@@ -6,7 +6,7 @@ on:
       - main
   workflow_dispatch:
   schedule:
-  - cron: "*/5 * * * *"
+  - cron: "*/30 * * * *"
 
 jobs:
   validate:
@@ -17,9 +17,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y curl jq
-          YQ_VERSION=v4.44.3
-          sudo curl -sSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-          sudo chmod +x /usr/local/bin/yq
+          sudo pip install yq
       - run: |
           chmod +x ./scripts/validate_manifests.sh
           ./scripts/validate_manifests.sh
@@ -32,9 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y curl jq
-          YQ_VERSION=v4.44.3
-          sudo curl -sSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-          sudo chmod +x /usr/local/bin/yq
+          sudo pip install yq
       - run: |
           chmod +x ./scripts/apply_records.sh
           ./scripts/apply_records.sh \
