@@ -1,0 +1,31 @@
+name: "Apply Record manifests to Cloudflare"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+  - cron: "*/5 * * * *"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo pip install yq
+          sudo apt install curl jq -y
+      - run: |
+          chmod +x ./scripts/validate_records.sh
+          ./scripts/validate_records.sh
+  # build:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: |
+  #         sudo pip install yq
+  #         sudo apt install curl jq -y
+  #     - run: |
+  #         chmod +x ./scripts/apply_records.sh
+  #         ./scripts/apply_records.sh ${{ secrets.CF_TOKEN }} ${{ secrets.CF_ZONE }}
