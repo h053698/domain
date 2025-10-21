@@ -13,19 +13,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq
+          sudo wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
       - run: |
-          sudo pip install yq
-          sudo apt install curl jq -y
+          chmod +x ./scripts/validate_manifests.sh
+          ./scripts/validate_manifests.sh
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq
+          sudo wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
       - run: |
-          chmod +x ./scripts/validate_records.sh
-          ./scripts/validate_records.sh
-  # build:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - run: |
-  #         sudo pip install yq
-  #         sudo apt install curl jq -y
-  #     - run: |
-  #         chmod +x ./scripts/apply_records.sh
-  #         ./scripts/apply_records.sh ${{ secrets.CF_TOKEN }} ${{ secrets.CF_ZONE }}
+          chmod +x ./scripts/apply_records.sh
+          ./scripts/apply_records.sh \
+            "${{ secrets.CF_TOKEN }}" \
+            "sunrin.io=${{ secrets.CF_ZONE_SUNRIN_IO }}" \
+            "swfestival.kr=${{ secrets.CF_ZONE_SWFESTIVAL_KR }}"
