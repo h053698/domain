@@ -208,16 +208,16 @@ sync_domain() {
     echo "Deleting records..."
     while IFS= read -r -d '' record; do
       [[ -n "$record" ]] || continue
-      # Validate that record is valid JSON before parsing
+
       if ! jq -e '.' >/dev/null 2>&1 <<<"$record"; then
         echo "   ! Skipping invalid record JSON" >&2
         continue
       fi
-      # Extract fields with error suppression
+
       id=$(jq -r '.id // empty' 2>/dev/null <<<"$record" || echo "")
       name=$(jq -r '.name // empty' 2>/dev/null <<<"$record" || echo "")
       type=$(jq -r '.type // empty' 2>/dev/null <<<"$record" || echo "")
-      # Skip if any required field is empty
+
       if [[ -z "$id" || -z "$name" || -z "$type" ]]; then
         echo "   ! Skipping record with missing fields" >&2
         continue
@@ -239,12 +239,10 @@ sync_domain() {
     echo "Updating records..."
     while IFS= read -r -d '' entry; do
       [[ -n "$entry" ]] || continue
-      # Validate that entry is valid JSON before parsing
       if ! jq -e '.' >/dev/null 2>&1 <<<"$entry"; then
         echo "   ! Skipping invalid entry JSON" >&2
         continue
       fi
-      # Extract fields with error suppression
       desired=$(jq '.desired' 2>/dev/null <<<"$entry" || echo "{}")
       existing_id=$(jq -r '.existing.id // empty' 2>/dev/null <<<"$entry" || echo "")
       type=$(jq -r '.desired.type // empty' 2>/dev/null <<<"$entry" || echo "")
