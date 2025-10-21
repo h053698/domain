@@ -206,7 +206,8 @@ sync_domain() {
 
   if (( records_deleted > 0 )); then
     echo "Deleting records..."
-    while IFS= read -r record; do
+    while IFS= read -r -d '' record; do
+      [[ -n "$record" ]] || continue
       id=$(jq -r '.id' <<<"$record")
       name=$(jq -r '.name' <<<"$record")
       type=$(jq -r '.type' <<<"$record")
@@ -220,12 +221,13 @@ sync_domain() {
         echo "   ! Failed to delete $type $name: ${message:-unknown error}" >&2
         return 1
       fi
-    done < <(jq -c '.[]' <<<"$records_to_delete")
+    done < <(jq -j '.[] | @json, "\u0000"' <<<"$records_to_delete")
   fi
 
   if (( records_updated > 0 )); then
     echo "Updating records..."
-    while IFS= read -r entry; do
+    while IFS= read -r -d '' entry; do
+      [[ -n "$entry" ]] || continue
       desired=$(jq '.desired' <<<"$entry")
       existing_id=$(jq -r '.existing.id' <<<"$entry")
       type=$(jq -r '.desired.type' <<<"$entry")
@@ -255,12 +257,13 @@ sync_domain() {
         echo "   ! Failed to update $type $name: ${message:-unknown error}" >&2
         return 1
       fi
-    done < <(jq -c '.[]' <<<"$records_to_update")
+    done < <(jq -j '.[] | @json, "\u0000"' <<<"$records_to_update")
   fi
 
   if (( records_created > 0 )); then
     echo "Creating records..."
-    while IFS= read -r record; do
+    while IFS= read -r -d '' record; do
+      [[ -n "$record" ]] || continue
       type=$(jq -r '.type' <<<"$record")
       name=$(jq -r '.name' <<<"$record")
       file=$(jq -r '.file' <<<"$record")
@@ -288,7 +291,7 @@ sync_domain() {
         echo "   ! Failed to create $type $name: ${message:-unknown error}" >&2
         return 1
       fi
-    done < <(jq -c '.[]' <<<"$records_to_create")
+    done < <(jq -j '.[] | @json, "\u0000"' <<<"$records_to_create")
   fi
 
   echo "Finished syncing ${manifest_dir#$REPO_ROOT/}."
