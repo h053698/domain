@@ -78,12 +78,16 @@ process_records() {
     esac
     
     log_action "$action $type $name${file:+ (from $file)}"
-    local resp=$(cf_api "$method" "$url" "$payload")
-    if ! api_success "$resp"; then
-      log "! Failed: $(api_error "$resp")"
-      return 1
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+      log "[DRY-RUN] Skipped API call for $action $type $name"
+    else
+      local resp=$(cf_api "$method" "$url" "$payload")
+      if ! api_success "$resp"; then
+        log "! Failed: $(api_error "$resp")"
+        return 1
+      fi
     fi
-  done < <(jq -j '.[] | @json, "\u0000"' 2>/dev/null <<<"$records_json")
+  done < <(jq -j '.[] | select(type=="object") | @json, "\u0000"' 2>/dev/null <<<"$records_json")
 }
 
 fetch_cloudflare_json() {
@@ -127,20 +131,35 @@ load_manifest_json() {
 }
 
 compute_diff() {
-  jq -n --argjson m "$1" --argjson c "$2" '{
-    delete: [$c[] as $cf | select(($m | any(.type == $cf.type and .name == $cf.name)) | not)],
-    create: [$m[] as $d | ($c | map(select(.type == $d.type and .name == $d.name))) as $cs | select(($cs | length) == 0) | $d],
-    update: [$m[] as $d | ($c | map(select(.type == $d.type and .name == $d.name))) as $cs
-      | select(($cs | length) > 0)
-      | select(($cs | any(
-          (.content == $d.content) and
-          (.ttl == $d.ttl) and
-          (if $d.type == "A" or $d.type == "AAAA" or $d.type == "CNAME" then ((.proxied // false) == ($d.proxied // false)) else true end) and
-          ((.priority // null) == ($d.priority // null)) and
-          ((.comment // "") == ($d.comment // ""))
-        )) | not)
-      | {existing: ($cs[0]), desired: $d}]
-  }'
+  jq -n --argjson m "$1" --argjson c "$2" '
+    def type_has_proxied(t): t=="A" or t=="AAAA" or t=="CNAME";
+    def cname_norm(s): if (s|type)=="string" then (s|sub("\\.$";"")) else s end;
+    def eq($cur;$d):
+      (if $d.type=="CNAME" then (cname_norm($cur.content//"") == cname_norm($d.content//"")) else (($cur.content//"") == ($d.content//"")) end)
+      and (if ($d.ttl != null and ((type_has_proxied($d.type) and ($cur.proxied // false)) | not)) then (($cur.ttl // 1) == ($d.ttl // 1)) else true end)
+      and (if (type_has_proxied($d.type) and ($d.proxied != null)) then (($cur.proxied // false) == ($d.proxied // false)) else true end)
+      and (if $d.priority != null then (($cur.priority // null) == $d.priority) else true end)
+      and (if ($d.comment != null and $d.comment != "") then (($cur.comment // "") == $d.comment) else true end);
+
+    {
+      delete: [$c[] as $cf
+        | ($m | map(select(.type == $cf.type and .name == $cf.name))) as $md
+        | select(($md | length) == 0)
+        | $cf
+      ],
+      create: [$m[] as $mf
+        | ($c | map(select(.type == $mf.type and .name == $mf.name))) as $cc
+        | select(($cc | length) == 0)
+        | $mf
+      ],
+      update: [$m[] as $d
+        | ($c | map(select(.type == $d.type and .name == $d.name))) as $cc
+        | select(($cc | length) == 1)
+        | ($cc[0]) as $cur
+        | select(eq($cur; $d) | not)
+        | {existing:$cur, desired:$d}
+      ]
+    }'
 }
 
 sync_domain() {
@@ -172,9 +191,9 @@ sync_domain() {
   log_step "Syncing ${manifest_dir#$REPO_ROOT/} (zone: $zone_id)"
   log " - to create: $cre_cnt, update: $upd_cnt, delete: $del_cnt"
   
-  (( del_cnt > 0 )) && { log_step "Deleting"; process_records DELETE "$del" "$zone_id" || return 1; }
-  (( upd_cnt > 0 )) && { log_step "Updating"; process_records UPDATE "$upd" "$zone_id" || return 1; }
-  (( cre_cnt > 0 )) && { log_step "Creating"; process_records CREATE "$cre" "$zone_id" || return 1; }
+  (( del_cnt > 0 )) && { log_step "Deleting"; process_records DELETE "$(jq -c '[.[] | objects]' <<<"$del")" "$zone_id" || return 1; }
+  (( upd_cnt > 0 )) && { log_step "Updating"; process_records UPDATE "$(jq -c '[.[] | objects]' <<<"$upd")" "$zone_id" || return 1; }
+  (( cre_cnt > 0 )) && { log_step "Creating"; process_records CREATE "$(jq -c '[.[] | objects]' <<<"$cre")" "$zone_id" || return 1; }
   
   log "Finished syncing ${manifest_dir#$REPO_ROOT/}."
 }
