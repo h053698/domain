@@ -23,3 +23,15 @@ example.yaml 양식을 모두 기재한 후, 해당하는 도메인 디렉토리
 ex) `A-ssf.sunrin.io` 형식으로 기재해주세요.  
 기재한 후, 해당 수정본이 반영된 커밋을 Pull Request를 올려주세요.
 만약, TXT 레코드의 경우 파일명이 겹칠 수 있습니다. 이 때, TXT-googleverify.yaml와 같은 이름을 사용할 수 있습니다.
+
+### 주의
+- Vercel Record 등록의 경우 PR에 Vercel 레코드 등록 요청임을 명확하게 작성하여야 합니다.
+
+### 등록 금지 사례
+[sunrint-hs/domain](https://github.com/sunrint-hs/domain)에서 관리되는 도메인은 학교 공식 행사 및 서비스에 한하여 사용되어야 합니다.
+- **학교 공식 행사나 서비스가 아닌 개인적 목적**의 도메인 사용
+- **상업적/외부 개인 브랜드용** 서비스 등록 요청
+- 위 내용을 제외한 기타 부적절한 도메인 등록 요청
+
+### 문의
+문의사항은 각 도메인 메인테이너 또는 [contact@sunrin.io](mailto:contact@sunrin.io)로 연락주시기 바랍니다.
