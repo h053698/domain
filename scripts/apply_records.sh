@@ -9,6 +9,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_BASE="https://api.cloudflare.com/client/v4"
 
 REC_FIELDS='{id,type,name,content,ttl,proxied:(.proxied//null),priority:(.priority//null),comment:(.comment//null)}'
+SKIP_NAMES_JSON='["cf2024-1._domainkey"]'
 
 DOMAIN_DIRS=()
 DOMAIN_ZONES=()
@@ -28,7 +29,7 @@ log_step() { log "$1..."; }
 log_fail() { log "! $1"; }
 
 build_payload() {
-  jq -c '{type,name,content,ttl} + (if .comment != null and .comment != "" then {comment} else {} end) + (if .priority != null then {priority} else {} end) + (if .type == "A" or .type == "CNAME" then {proxied: (.proxied // false)} else {} end)' <<<"$1"
+  jq -c '{type,name,content,ttl} + (if .comment != null and .comment != "" then {comment} else {} end) + (if .priority != null then {priority} else {} end) + (if (.type == "A" or .type == "AAAA" or .type == "CNAME") then {proxied: (.proxied // false)} else {} end)' <<<"$1"
 }
 
 cf_api() {
@@ -94,7 +95,13 @@ fetch_cloudflare_json() {
     local resp
     resp=$(cf_api "GET" "$API_BASE/zones/$zone_id/dns_records?per_page=100&page=$page")
     api_success "$resp" || { log_fail "[zone:$zone_id] Fetch failed: $(api_error "$resp")"; return 1; }
-    out=$(jq -sc "$out + ([.result[] | select(.type == \"A\" or .type == \"CNAME\" or .type == \"TXT\") | ${REC_FIELDS}])" <<<"$resp")
+    out=$(jq -c --argjson acc "$out" --argjson skip "$SKIP_NAMES_JSON" '
+      def should_skip($n): reduce $skip[] as $s (false; . or ($n | contains($s)));
+      $acc + ([.result[]
+        | select(.type == "A" or .type == "AAAA" or .type == "CNAME" or .type == "TXT")
+        | select(should_skip(.name // "") | not)
+        | {id,type,name,content,ttl,proxied:(.proxied//null),priority:(.priority//null),comment:(.comment//null)}])
+    ' <<<"$resp")
     total_pages=$(jq '.result_info.total_pages // 1' <<<"$resp")
     ((page++))
   done
@@ -107,27 +114,33 @@ load_manifest_json() {
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
     local rec
-    rec=$(yq e -o=json -I=0 '.record' "$file" | jq -c --arg file "${file#$REPO_ROOT/}" '{file:$file,type,name,content:.value,ttl,proxied:(.proxied//null),priority:(.priority//null),comment:(.comment//null)}')
-    items=$(jq -sc "$items + [ $rec ]")
+    rec=$(yq e -o=json -I=0 '.record' "$file" | jq -c --arg file "${file#$REPO_ROOT/}" --argjson skip "$SKIP_NAMES_JSON" '
+      def should_skip($n): reduce $skip[] as $s (false; . or ($n | contains($s)));
+      select(.type == "A" or .type == "AAAA" or .type == "CNAME" or .type == "TXT")
+      | select(should_skip(.name // "") | not)
+      | {file:$file,type,name,content:.value,ttl,proxied:(.proxied//null),priority:(.priority//null),comment:(.comment//null)}')
+    [[ -z "$rec" ]] && continue
+    is_json "$rec" || { log_fail "Invalid manifest JSON in $file"; continue; }
+    items=$(jq -c --argjson rec "$rec" '. + [ $rec ]' <<<"$items")
   done < <(find "$manifest_dir" -type f -name '*.yaml' | sort)
   echo "$items"
 }
 
 compute_diff() {
-  jq -n --argjson m "$1" --argjson c "$2" '
-    def k(o): o.type + "|" + o.name;
-    def idx(a): INDEX(a[]; k(.));
-    ($m|idx) as $mi | ($c|idx) as $ci |
-    {
-      delete: [$c[] | select(($mi[k(.)]? // null) == null)],
-      create: [$m[] | select(($ci[k(.)]? // null) == null)],
-      update: [$m[] as $d | ($c[] | select(k(.) == k($d))) as $cur
-        | select($cur.content != $d.content or $cur.ttl != $d.ttl or
-                 (($d.type == "A" or $d.type == "CNAME") and ($cur.proxied // false) != ($d.proxied // false)) or
-                 ($cur.priority // null) != ($d.priority // null) or
-                 ($cur.comment // "") != ($d.comment // ""))
-        | {existing:$cur, desired:$d}]
-    }'
+  jq -n --argjson m "$1" --argjson c "$2" '{
+    delete: [$c[] as $cf | select(($m | any(.type == $cf.type and .name == $cf.name)) | not)],
+    create: [$m[] as $d | ($c | map(select(.type == $d.type and .name == $d.name))) as $cs | select(($cs | length) == 0) | $d],
+    update: [$m[] as $d | ($c | map(select(.type == $d.type and .name == $d.name))) as $cs
+      | select(($cs | length) > 0)
+      | select(($cs | any(
+          (.content == $d.content) and
+          (.ttl == $d.ttl) and
+          (if $d.type == "A" or $d.type == "AAAA" or $d.type == "CNAME" then ((.proxied // false) == ($d.proxied // false)) else true end) and
+          ((.priority // null) == ($d.priority // null)) and
+          ((.comment // "") == ($d.comment // ""))
+        )) | not)
+      | {existing: ($cs[0]), desired: $d}]
+  }'
 }
 
 sync_domain() {
@@ -139,19 +152,22 @@ sync_domain() {
   
   local manifests_json
   manifests_json=$(load_manifest_json "$manifest_dir")
-  (( $(jq 'length' <<<"$manifests_json") == 0 )) && { log "No manifests in $manifest_dir. Skipping."; return 0; }
+  local mf_count
+  mf_count=$(jq -r 'length // 0' <<<"$manifests_json" 2>/dev/null || echo 0)
+  (( mf_count == 0 )) && { log "No manifests in $manifest_dir. Skipping."; return 0; }
   
   local cloud_json
   cloud_json=$(fetch_cloudflare_json "$zone_id") || return 1
   
   local diff del upd cre del_cnt upd_cnt cre_cnt
   diff=$(compute_diff "$manifests_json" "$cloud_json")
-  del=$(jq -r '.delete' <<<"$diff")
-  upd=$(jq -r '.update' <<<"$diff")
-  cre=$(jq -r '.create' <<<"$diff")
-  del_cnt=$(jq length <<<"$del")
-  upd_cnt=$(jq length <<<"$upd")
-  cre_cnt=$(jq length <<<"$cre")
+  is_json "$diff" || { log_fail "Failed to compute diff (invalid JSON)."; return 1; }
+  del=$(jq -c '.delete // []' <<<"$diff")
+  upd=$(jq -c '.update // []' <<<"$diff")
+  cre=$(jq -c '.create // []' <<<"$diff")
+  del_cnt=$(jq length <<<"$del" 2>/dev/null || echo 0)
+  upd_cnt=$(jq length <<<"$upd" 2>/dev/null || echo 0)
+  cre_cnt=$(jq length <<<"$cre" 2>/dev/null || echo 0)
   
   log_step "Syncing ${manifest_dir#$REPO_ROOT/} (zone: $zone_id)"
   log " - to create: $cre_cnt, update: $upd_cnt, delete: $del_cnt"
