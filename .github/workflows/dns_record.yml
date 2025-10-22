@@ -2,6 +2,9 @@ name: "Apply Record manifests to Cloudflare"
 
 on:
   push:
+    paths:
+      - "**/*.yml"
+      - "**/*.yaml"
     branches:
       - main
   workflow_dispatch:
